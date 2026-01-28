@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		// Core Settings
+		"target": "ESNext",
+		"module": "Preserve",
+		"moduleResolution": "bundler",
+		"lib": ["ESNext", "DOM"],
+		// Strictness & Best Practices
+		"strict": true,
+		"verbatimModuleSyntax": true,
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"noUncheckedIndexedAccess": true,
+		// Output
+		"declaration": true,
+		"outDir": "./dist",
+		// Performance
+		"skipLibCheck": true
+	},
+	"include": ["src", "test"]
+}
