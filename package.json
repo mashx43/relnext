@@ -1,6 +1,6 @@
 {
 	"name": "@mash43/relnext",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "A TypeScript library designed to detect pagination links such as \"next\" and \"previous\" from web page HTML content or URLs.",
 	"author": "mash43",
 	"license": "MIT",
