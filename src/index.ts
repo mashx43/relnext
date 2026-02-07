@@ -27,8 +27,8 @@ const REGEX = {
 		prev: /rel\s*=\s*(['"])[^'"]*?\b(prev|previous)\b[^'"]*?\1/i,
 	},
 	TEXT: {
-		next: /^\s*(((Next)\s*(page)?|older|forward)|((次|つぎ)(のページ)?(へ)?)|((下|后)\s*(一)?(页|頁))|(다음)|»|>|→)\s*>*$/i,
-		prev: /^\s*<*(((Prev|Previous)\s*(page)?|older|back)|((前)(のページ)?(へ)?)|((上|前)\s*(一)?(页|頁))|(이전)|«|<|←)\s*$/i,
+		next: /^\s*(((Next)\s*(page)?|older|forward)|((次|つぎ)(のページ)?(へ)?)|((下|后)\s*(一)?(页|頁))|(다음)|»|>|→)\s*[»>→]*/i,
+		prev: /^\s*[«<←]*\s*(((Prev|Previous)\s*(page)?|older|back)|((前)(のページ)?(へ)?)|((上|前)\s*(一)?(页|頁))|(이전)|«|<|←)\s*$/i,
 	},
 	CLASS_NAME: {
 		next: /next/i,
