@@ -100,8 +100,9 @@ function extractAbsoluteHref(
 ): string | null {
 	const href = extractAttribute(attributes, "href");
 	if (href) {
+		const decodedHref = href.replace(/&amp;/g, "&");
 		try {
-			return new URL(href, baseUrl).href;
+			return new URL(decodedHref, baseUrl).href;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			options?.logger?.(
