@@ -1,5 +1,7 @@
 # @mash43/relnext
 
+English | [日本語](README.ja.md)
+
 [![npm version](https://img.shields.io/npm/v/@mash43/relnext.svg)](https://www.npmjs.com/package/@mash43/relnext) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 `@mash43/relnext` is a TypeScript library designed to detect pagination links such as "next" and "previous" from web page HTML content or URLs. It supports both traditional `<a>` links and modern SPA buttons (elements without `href`) by providing CSS selectors.
