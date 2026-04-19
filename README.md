@@ -147,6 +147,22 @@ Inherits from `BaseOptions`.
 5.  **`aria-label`**: Searches for anchor tags with `aria-label` attributes like "Next".
 6.  **`alt`**: Searches for anchor tags containing images with `alt` attributes including "Next".
 
+## Development
+
+### Running Tests
+
+#### Unit Tests
+```bash
+bun run test:unit
+```
+
+#### E2E Tests
+E2E tests use `Bun.WebView` to test against live sites. You can specify the URL to test using the `TEST_URL` environment variable.
+
+```bash
+TEST_URL=https://example.com bun run test:e2e
+```
+
 ## License
 
 [MIT](./LICENSE)

@@ -5,6 +5,8 @@
 		"module": "Preserve",
 		"moduleResolution": "bundler",
 		"lib": ["ESNext", "DOM"],
+		"types": ["node", "bun"],
+		"rootDir": "./src",
 		// Strictness & Best Practices
 		"strict": true,
 		"verbatimModuleSyntax": true,
@@ -17,5 +19,5 @@
 		// Performance
 		"skipLibCheck": true
 	},
-	"include": ["src", "test"]
+	"include": ["src"]
 }
