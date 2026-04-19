@@ -27,8 +27,8 @@ const REGEX = {
 		prev: /rel\s*=\s*(['"])[^'"]*?\b(prev|previous)\b[^'"]*?\1/i,
 	},
 	TEXT: {
-		next: /^\s*(((Next)\s*(page)?|older|forward)|((次|つぎ)(のページ)?(へ)?)|((下|后)\s*(一)?(页|頁))|(다음)|»|>|→)\s*[»>→]*$/i,
-		prev: /^\s*[«<←]*\s*(((Prev|Previous)\s*(page)?|older|back)|((前)(のページ)?(へ)?)|((上|前)\s*(一)?(页|頁))|(이전)|«|<|←)\s*$/i,
+		next: /^\s*(((Next|older)\s*(page|post(s)?)?|forward)|((次|つぎ)(のページ)?(へ)?)|((下|后)\s*(一)?(页|頁))|(다음)|»|>|→)\s*[»>→]*$/i,
+		prev: /^\s*[«<←]*\s*(((Prev|Previous|newer)\s*(page|post(s)?)?|back)|((前)(のページ)?(へ)?)|((上|前)\s*(一)?(页|頁))|(이전)|«|<|←)\s*$/i,
 	},
 	CLASS_NAME: {
 		next: /next/i,
@@ -55,6 +55,7 @@ const REGEX = {
 	ANCHOR_TAG_START: /<a\s+(?<attributes>[^>]+)>/gi,
 	PAGINATION_CONTAINER:
 		/<(?:div|nav|ul)[^>]+(?:class|id)\s*=\s*['"][^'"]*(?:pagination|pager|page-nav)[^'"]*['"][^>]*>(?<containerHtml>[\s\S]*?)<\/(?:div|nav|ul)>/gi,
+	ARTICLE_EXCLUDE: /<(?:p|article)[^>]*?>[\s\S]*?<\/(?:p|article)>/gi,
 	IMG_TAG: /<img[^>]+>/gi,
 	PATH_PAGE_NUMBER: /^(.*[/\-_])(\d+)$/,
 	HTML_TAGS: /<[^>]+>/g,
@@ -188,6 +189,7 @@ function findLinkByPaginationStructure(
 	baseUrl: string,
 	liRegex: RegExp,
 	fallbackRegex: RegExp,
+	textRegex: RegExp,
 	options?: BaseOptions,
 ): string | null {
 	const paginationContainers = html.matchAll(REGEX.PAGINATION_CONTAINER);
@@ -199,6 +201,7 @@ function findLinkByPaginationStructure(
 			continue;
 		}
 
+		// 1. Try structural match (current/active)
 		const liMatch = containerHtml.match(liRegex);
 		if (liMatch?.groups?.attributes) {
 			const absoluteUrl = extractAbsoluteHref(
@@ -221,6 +224,12 @@ function findLinkByPaginationStructure(
 			if (absoluteUrl) {
 				return absoluteUrl;
 			}
+		}
+
+		// 2. Try text match within the pagination container (high priority)
+		const urlByText = findLinkByText(containerHtml, baseUrl, textRegex, options);
+		if (urlByText) {
+			return urlByText;
 		}
 	}
 
@@ -251,7 +260,6 @@ function findLinkByText(
 			continue;
 		}
 		if (textRegex.test(cleanText)) {
-			console.log(textRegex, cleanText);
 			const absoluteUrl = extractAbsoluteHref(attributes, baseUrl, options);
 			if (absoluteUrl) {
 				return absoluteUrl;
@@ -367,34 +375,46 @@ function findLink(
 	];
 
 	// Dispatch table (map of strategies)
-	const strategies: { [key in Method]: () => string | null } = {
-		rel: () => findLinkByRel(html, baseUrl, REGEX.REL[direction], options),
-		pagination: () =>
+	const strategies: { [key in Method]: (h: string) => string | null } = {
+		rel: (h) => findLinkByRel(h, baseUrl, REGEX.REL[direction], options),
+		pagination: (h) =>
 			findLinkByPaginationStructure(
-				html,
+				h,
 				baseUrl,
 				REGEX.PAGINATION_LI[direction],
 				REGEX.PAGINATION_FALLBACK[direction],
+				REGEX.TEXT[direction],
 				options,
 			),
-		text: () => findLinkByText(html, baseUrl, REGEX.TEXT[direction], options),
-		className: () =>
+		text: (h) => findLinkByText(h, baseUrl, REGEX.TEXT[direction], options),
+		className: (h) =>
 			findLinkByClassName(
-				html,
+				h,
 				baseUrl,
 				REGEX.CLASS_NAME[direction],
 				options?.classNameRegex,
 				options,
 			),
-		"aria-label": () =>
-			findLinkByAriaLabel(html, baseUrl, REGEX.TEXT[direction], options),
-		alt: () => findLinkByAltText(html, baseUrl, REGEX.TEXT[direction], options),
+		"aria-label": (h) =>
+			findLinkByAriaLabel(h, baseUrl, REGEX.TEXT[direction], options),
+		alt: (h) => findLinkByAltText(h, baseUrl, REGEX.TEXT[direction], options),
 	};
 
+	// Try with content excluded first to avoid false positives in article body
+	const excludedHtml = html.replace(REGEX.ARTICLE_EXCLUDE, "");
+
 	for (const method of methods) {
-		const url = strategies[method]();
-		if (url) {
-			return url;
+		// Only apply exclusion to methods that are prone to finding links in text content
+		if (["text", "className", "aria-label", "alt"].includes(method)) {
+			const url = strategies[method](excludedHtml);
+			if (url) {
+				return url;
+			}
+		} else {
+			const url = strategies[method](html);
+			if (url) {
+				return url;
+			}
 		}
 	}
 
