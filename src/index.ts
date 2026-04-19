@@ -1,11 +1,20 @@
 // src/index.ts
 
+// --- Types ---
+
+/**
+ * Base options for configuration.
+ */
 export interface BaseOptions {
+	/** Logger function for warnings and errors. */
 	logger?: (level: "warn" | "error", message: string) => void;
+	/** Timeout in milliseconds for network requests. */
 	timeout?: number;
+	/** Whether to verify if the inferred URL actually exists. */
 	verifyExists?: boolean;
 }
 
+/** Strategies for finding links. */
 export type Method =
 	| "rel"
 	| "pagination"
@@ -14,12 +23,20 @@ export type Method =
 	| "aria-label"
 	| "alt";
 
+/**
+ * Options for findNext and findPrev functions.
+ */
 export interface FindNextOptions extends BaseOptions {
+	/** List of search strategies to use (executed in the specified order). */
 	methods?: Method[];
+	/** Custom regular expression for className-based search. */
 	classNameRegex?: RegExp;
 }
 
+/** Direction to search. */
 type Direction = "next" | "prev";
+
+// --- Constants & Regex ---
 
 const REGEX = {
 	REL: {
@@ -35,21 +52,13 @@ const REGEX = {
 		prev: /prev|previous/i,
 	},
 	PAGINATION_LI: {
-		// Extracts attributes of an <a> tag within an <li> element that follows a current/active <li> element (e.g., <li class="current">1</li> <li class=""><a href="/page/2">2</a></li>)
-		next: /<li[^>]+class\s*=\s*['"][^'"]*(?:current|active)[^'"]*['"][^>]*>.*?<\/li>\s*<li[^>]*>\s*<a\s+(?<attributes>[^>]+)>/is,
-		// Extracts attributes of an <a> tag within an <li> element that precedes a current/active <li> element (e.g., <li class=""><a href="/page/1">1</a></li> <li class="current">2</li>)
-		prev: /<li[^>]*>\s*<a\s+(?<attributes>[^>]+)>.*?<\/a>\s*<\/li>\s*<li[^>]+class\s*=\s*['"][^'"]*(?:current|active)[^'"]*['"][^>]*>/is,
+		next: /<li[^>]+(?:class\s*=\s*['"][^'"]*(?:current|active|is-active|selected)[^'"]*['"]|aria-current\s*=\s*['"]page['"]|aria-selected\s*=\s*['"]true['"])[^>]*>.*?<\/li>\s*<li[^>]*>\s*<a\s+(?<attributes>[^>]+)>/is,
+		prev: /<li[^>]*>\s*<a\s+(?<attributes>[^>]+)>.*?<\/a>\s*<\/li>\s*<li[^>]+(?:class\s*=\s*['"][^'"]*(?:current|active|is-active|selected)[^'"]*['"]|aria-current\s*=\s*['"]page['"]|aria-selected\s*=\s*['"]true['"])[^>]*>/is,
 	},
 	PAGINATION_FALLBACK: {
-		// Extracts attributes of an <a> tag that follows a current/active element (span, a, or strong tag with current/active class or aria-current="page").
-		// This handles cases where there's no <li> element structure or for more general pagination.
-		// Example: <span class="current">1</span> <a href="/page/2">2</a>
-		next: /(?:<(?:span|a)[^>]+(?:class\s*=\s*['"](?:current|active)['"]|aria-current\s*=\s*['"]page['"])|strong)\s*[^<]*\s*<\/(?:span|a|strong)>\s*<a\s+(?<attributes>[^>]+)>/i,
-		// Extracts attributes of an <a> tag that precedes a current/active element.
-		// Example: <a href="/page/1">1</a> <span class="current">2</span>
-		prev: /<a\s+(?<attributes>[^>]+)>.*?<\/a>\s*(?:<(?:span|a)[^>]+(?:class\s*=\s*['"](?:current|active)['"]|aria-current\s*=\s*['"]page['"])|strong)\s*[^<]*/i,
+		next: /<(?:span|a|div)[^>]*?\b(?:class\s*=\s*['"][^'"]*?\b(current|active|is-active|selected)\b[^'"]*?['"]|aria-current\s*=\s*['"]page['"]|aria-selected\s*=\s*['"]true['"])[^>]*?>.*?<\/(?:span|a|div)>[\s\u00a0·|/]*<a\s+(?<attributes>[^>]+)>/is,
+		prev: /<a\s+(?<attributes>[^>]+)>.*?<\/a>[\s\u00a0·|/]*<(?:span|a|div)[^>]*?\b(?:class\s*=\s*['"][^'"]*?\b(current|active|is-active|selected)\b[^'"]*?['"]|aria-current\s*=\s*['"]page['"]|aria-selected\s*=\s*['"]true['"])[^>]*?>.*?<\/(?:span|a|div)>/is,
 	},
-	// Common Regex
 	POTENTIAL_LINK_TAGS: /<(?:a|link)\s+(?<attributes>[^>]*?)>/gi,
 	ANCHOR_TAG: /<a\s+(?<attributes>[^>]+)>(?<innerText>.*?)<\/a>/gis,
 	ANCHOR_TAG_START: /<a\s+(?<attributes>[^>]+)>/gi,
@@ -63,14 +72,15 @@ const REGEX = {
 };
 
 const DEFAULT_TIMEOUT_MS = 8000;
-
 const attributeRegexCache = new Map<string, RegExp>();
 
+// --- Utilities ---
+
 /**
- * Extracts the value of a specified attribute from an attribute string.
- * @param attributes The string containing attributes.
- * @param attributeName The name of the attribute to extract (e.g., "href", "class", "id").
- * @returns The value of the attribute, or null if not found.
+ * Extracts the value of a specific attribute from an attributes string.
+ * @param attributes String containing attributes.
+ * @param attributeName Name of the attribute to extract (e.g., "href", "class").
+ * @returns The attribute value, or null if not found.
  */
 function extractAttribute(
 	attributes: string,
@@ -89,10 +99,11 @@ function extractAttribute(
 }
 
 /**
- * Extracts the href attribute from an attribute string and converts it to an absolute URL.
- * @param attributes The string containing attributes.
- * @param baseUrl The base URL for resolving relative paths.
- * @returns The absolute URL, or null if not found/invalid.
+ * Extracts href from attributes and converts it to an absolute URL.
+ * @param attributes String containing attributes.
+ * @param baseUrl Base URL for resolving relative paths.
+ * @param options Base options.
+ * @returns Absolute URL, or null if invalid.
  */
 function extractAbsoluteHref(
 	attributes: string,
@@ -100,27 +111,276 @@ function extractAbsoluteHref(
 	options?: BaseOptions,
 ): string | null {
 	const href = extractAttribute(attributes, "href");
-	if (href) {
-		const decodedHref = href.replace(/&amp;/g, "&");
-		try {
-			return new URL(decodedHref, baseUrl).href;
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			options?.logger?.(
-				"warn",
-				`Invalid URL '${href}' for base '${baseUrl}': ${message}`,
-			);
-			return null;
+	if (!href) return null;
+
+	const decodedHref = href.replace(/&amp;/g, "&");
+	try {
+		return new URL(decodedHref, baseUrl).href;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		options?.logger?.(
+			"warn",
+			`Invalid URL '${href}' for base '${baseUrl}': ${message}`,
+		);
+		return null;
+	}
+}
+
+/**
+ * Checks if a URL actually exists using a HEAD request.
+ * @param url URL to check.
+ * @param options Base options.
+ * @returns True if the URL exists.
+ */
+async function urlExists(url: string, options?: BaseOptions): Promise<boolean> {
+	const controller = new AbortController();
+	const timeoutId = setTimeout(
+		() => controller.abort(),
+		options?.timeout ?? DEFAULT_TIMEOUT_MS,
+	);
+
+	try {
+		const response = await fetch(url, {
+			method: "HEAD",
+			signal: controller.signal,
+		});
+		return response.ok;
+	} catch {
+		return false;
+	} finally {
+		clearTimeout(timeoutId);
+	}
+}
+
+// --- Internal Helper: findFirstValidUrl ---
+
+/**
+ * Finds the first valid absolute URL from regex matches.
+ * @param matches Iterator of RegExpMatchArray.
+ * @param baseUrl Base URL for resolution.
+ * @param options Base options.
+ * @param extractor Function to extract attribute string from a match.
+ * @returns The first valid absolute URL found, or null.
+ */
+function findFirstValidUrl(
+	matches: IterableIterator<RegExpMatchArray>,
+	baseUrl: string,
+	options: BaseOptions | undefined,
+	extractor: (match: RegExpMatchArray) => string | null | undefined,
+): string | null {
+	for (const match of matches) {
+		const attributes = extractor(match);
+		if (attributes) {
+			const url = extractAbsoluteHref(attributes, baseUrl, options);
+			if (url) return url;
 		}
 	}
 	return null;
 }
 
+// --- Search Strategies ---
+
+function findLinkByRel(
+	html: string,
+	baseUrl: string,
+	relRegex: RegExp,
+	options?: BaseOptions,
+): string | null {
+	return findFirstValidUrl(
+		html.matchAll(REGEX.POTENTIAL_LINK_TAGS),
+		baseUrl,
+		options,
+		(match) =>
+			relRegex.test(match.groups?.attributes ?? "")
+				? match.groups?.attributes
+				: null,
+	);
+}
+
+function findLinkByPaginationStructure(
+	html: string,
+	baseUrl: string,
+	liRegex: RegExp,
+	fallbackRegex: RegExp,
+	textRegex: RegExp,
+	options?: BaseOptions,
+): string | null {
+	for (const match of html.matchAll(REGEX.PAGINATION_CONTAINER)) {
+		const containerHtml = match.groups?.containerHtml;
+		if (!containerHtml) continue;
+
+		// 1. Structural match
+		const liMatch = containerHtml.match(liRegex);
+		if (liMatch?.groups?.attributes) {
+			const url = extractAbsoluteHref(
+				liMatch.groups.attributes,
+				baseUrl,
+				options,
+			);
+			if (url) return url;
+		}
+
+		const fallbackMatch = containerHtml.match(fallbackRegex);
+		if (fallbackMatch?.groups?.attributes) {
+			const url = extractAbsoluteHref(
+				fallbackMatch.groups.attributes,
+				baseUrl,
+				options,
+			);
+			if (url) return url;
+		}
+
+		// 2. Text match within container
+		const urlByText = findLinkByText(
+			containerHtml,
+			baseUrl,
+			textRegex,
+			options,
+		);
+		if (urlByText) return urlByText;
+	}
+	return null;
+}
+
+function findLinkByText(
+	html: string,
+	baseUrl: string,
+	textRegex: RegExp,
+	options?: BaseOptions,
+): string | null {
+	return findFirstValidUrl(
+		html.matchAll(REGEX.ANCHOR_TAG),
+		baseUrl,
+		options,
+		(match) => {
+			const innerText = match.groups?.innerText ?? "";
+			const cleanText = innerText
+				.replace(REGEX.HTML_TAGS, "")
+				.replace(REGEX.HTML_ENTITIES, "")
+				.trim();
+			return cleanText && textRegex.test(cleanText)
+				? match.groups?.attributes
+				: null;
+		},
+	);
+}
+
+function findLinkByClassName(
+	html: string,
+	baseUrl: string,
+	defaultRegex: RegExp,
+	classNameRegex?: RegExp,
+	options?: BaseOptions,
+): string | null {
+	return findFirstValidUrl(
+		html.matchAll(REGEX.ANCHOR_TAG_START),
+		baseUrl,
+		options,
+		(match) => {
+			const attributes = match.groups?.attributes ?? "";
+			const classAttr = extractAttribute(attributes, "class");
+			const idAttr = extractAttribute(attributes, "id");
+			const isMatch =
+				(classAttr && (classNameRegex ?? defaultRegex).test(classAttr)) ||
+				(idAttr && defaultRegex.test(idAttr));
+			return isMatch ? attributes : null;
+		},
+	);
+}
+
+function findLinkByAriaLabel(
+	html: string,
+	baseUrl: string,
+	textRegex: RegExp,
+	options?: BaseOptions,
+): string | null {
+	return findFirstValidUrl(
+		html.matchAll(REGEX.ANCHOR_TAG_START),
+		baseUrl,
+		options,
+		(match) => {
+			const attributes = match.groups?.attributes ?? "";
+			const ariaLabel = extractAttribute(attributes, "aria-label");
+			return ariaLabel && textRegex.test(ariaLabel) ? attributes : null;
+		},
+	);
+}
+
+function findLinkByAltText(
+	html: string,
+	baseUrl: string,
+	textRegex: RegExp,
+	options?: BaseOptions,
+): string | null {
+	return findFirstValidUrl(
+		html.matchAll(REGEX.ANCHOR_TAG),
+		baseUrl,
+		options,
+		(match) => {
+			const innerHtml = match.groups?.innerText ?? "";
+			for (const [imgTag] of innerHtml.matchAll(REGEX.IMG_TAG)) {
+				const altText = extractAttribute(imgTag, "alt");
+				if (altText && textRegex.test(altText.trim())) {
+					return match.groups?.attributes;
+				}
+			}
+			return null;
+		},
+	);
+}
+
+// --- Inference Helpers ---
+
 /**
- * Asynchronously fetches HTML content from a given URL.
- * @param url The URL to fetch.
- * @param options Options.
- * @returns The HTML string, or null if fetching failed.
+ * Attempts to update a page number in the URL and verify its existence.
+ * @param currentUrl Current URL.
+ * @param updateFn Function to increment/decrement number.
+ * @param findFn Function to find page number in URL.
+ * @param rebuildFn Function to rebuild URL with new page number.
+ * @param options Base options.
+ * @returns The new URL if found and valid, or null.
+ */
+async function tryUpdatePageNumber(
+	currentUrl: string,
+	updateFn: (num: number) => number,
+	findFn: (url: URL) => { key: string; value: number; prefix?: string } | null,
+	rebuildFn: (
+		url: URL,
+		key: string,
+		newValue: number,
+		prefix?: string,
+	) => string,
+	options?: BaseOptions,
+): Promise<string | null> {
+	try {
+		const urlObj = new URL(currentUrl);
+		const result = findFn(urlObj);
+		if (result) {
+			const newNumber = updateFn(result.value);
+			if (newNumber > 0) {
+				const newUrl = rebuildFn(urlObj, result.key, newNumber, result.prefix);
+				if (
+					options?.verifyExists === false ||
+					(await urlExists(newUrl, options))
+				) {
+					return newUrl;
+				}
+			}
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		options?.logger?.("warn", `Error in URL inference: ${message}`);
+	}
+	return null;
+}
+
+// --- Public APIs ---
+
+/**
+ * Fetches HTML content from a URL.
+ * @param url URL to fetch.
+ * @param options Base options.
+ * @returns HTML string, or null if failed.
  */
 export async function fetchHtml(
 	url: string,
@@ -134,7 +394,6 @@ export async function fetchHtml(
 
 	try {
 		const response = await fetch(url, { signal: controller.signal });
-
 		if (!response.ok) {
 			options?.logger?.(
 				"warn",
@@ -159,207 +418,15 @@ export async function fetchHtml(
 	}
 }
 
-function findLinkByRel(
-	html: string,
-	baseUrl: string,
-	relRegex: RegExp,
-	options?: BaseOptions,
-): string | null {
-	const allPotentialLinks = html.matchAll(REGEX.POTENTIAL_LINK_TAGS);
-
-	for (const match of allPotentialLinks) {
-		const attributes = match.groups?.attributes;
-		if (!attributes) {
-			continue;
-		}
-
-		if (relRegex.test(attributes)) {
-			const absoluteUrl = extractAbsoluteHref(attributes, baseUrl, options);
-			if (absoluteUrl) {
-				return absoluteUrl;
-			}
-		}
-	}
-
-	return null;
-}
-
-function findLinkByPaginationStructure(
-	html: string,
-	baseUrl: string,
-	liRegex: RegExp,
-	fallbackRegex: RegExp,
-	textRegex: RegExp,
-	options?: BaseOptions,
-): string | null {
-	const paginationContainers = html.matchAll(REGEX.PAGINATION_CONTAINER);
-
-	for (const match of paginationContainers) {
-		const containerHtml = match.groups?.containerHtml;
-
-		if (!containerHtml) {
-			continue;
-		}
-
-		// 1. Try structural match (current/active)
-		const liMatch = containerHtml.match(liRegex);
-		if (liMatch?.groups?.attributes) {
-			const absoluteUrl = extractAbsoluteHref(
-				liMatch.groups.attributes,
-				baseUrl,
-				options,
-			);
-			if (absoluteUrl) {
-				return absoluteUrl;
-			}
-		}
-
-		const fallbackMatch = containerHtml.match(fallbackRegex);
-		if (fallbackMatch?.groups?.attributes) {
-			const absoluteUrl = extractAbsoluteHref(
-				fallbackMatch.groups.attributes,
-				baseUrl,
-				options,
-			);
-			if (absoluteUrl) {
-				return absoluteUrl;
-			}
-		}
-
-		// 2. Try text match within the pagination container (high priority)
-		const urlByText = findLinkByText(containerHtml, baseUrl, textRegex, options);
-		if (urlByText) {
-			return urlByText;
-		}
-	}
-
-	return null;
-}
-
-function findLinkByText(
-	html: string,
-	baseUrl: string,
-	textRegex: RegExp,
-	options?: BaseOptions,
-): string | null {
-	const anchorTags = html.matchAll(REGEX.ANCHOR_TAG);
-
-	for (const match of anchorTags) {
-		const attributes = match.groups?.attributes;
-		const innerText = match.groups?.innerText;
-
-		if (!attributes || !innerText) {
-			continue;
-		}
-
-		const cleanText = innerText
-			.replace(REGEX.HTML_TAGS, "")
-			.replace(REGEX.HTML_ENTITIES, "")
-			.trim();
-		if (!cleanText) {
-			continue;
-		}
-		if (textRegex.test(cleanText)) {
-			const absoluteUrl = extractAbsoluteHref(attributes, baseUrl, options);
-			if (absoluteUrl) {
-				return absoluteUrl;
-			}
-		}
-	}
-
-	return null;
-}
-
-function findLinkByClassName(
-	html: string,
-	baseUrl: string,
-	defaultRegex: RegExp,
-	classNameRegex?: RegExp,
-	options?: BaseOptions,
-): string | null {
-	const anchorTags = html.matchAll(REGEX.ANCHOR_TAG_START);
-
-	for (const match of anchorTags) {
-		const attributes = match.groups?.attributes;
-		if (!attributes) {
-			continue;
-		}
-
-		const classAttr = extractAttribute(attributes, "class");
-		const idAttr = extractAttribute(attributes, "id");
-
-		if (
-			(classAttr && (classNameRegex ?? defaultRegex).test(classAttr)) ||
-			(idAttr && defaultRegex.test(idAttr))
-		) {
-			const absoluteUrl = extractAbsoluteHref(attributes, baseUrl, options);
-			if (absoluteUrl) {
-				return absoluteUrl;
-			}
-		}
-	}
-
-	return null;
-}
-
-function findLinkByAriaLabel(
-	html: string,
-	baseUrl: string,
-	textRegex: RegExp,
-	options?: BaseOptions,
-): string | null {
-	const anchorTags = html.matchAll(REGEX.ANCHOR_TAG_START);
-
-	for (const match of anchorTags) {
-		const attributes = match.groups?.attributes;
-		if (!attributes) {
-			continue;
-		}
-
-		const ariaLabelAttr = extractAttribute(attributes, "aria-label");
-		if (ariaLabelAttr && textRegex.test(ariaLabelAttr)) {
-			const absoluteUrl = extractAbsoluteHref(attributes, baseUrl, options);
-			if (absoluteUrl) {
-				return absoluteUrl;
-			}
-		}
-	}
-
-	return null;
-}
-
-function findLinkByAltText(
-	html: string,
-	baseUrl: string,
-	textRegex: RegExp,
-	options?: BaseOptions,
-): string | null {
-	const anchorTags = html.matchAll(REGEX.ANCHOR_TAG);
-
-	for (const match of anchorTags) {
-		const attributes = match.groups?.attributes;
-		const innerHtml = match.groups?.innerText;
-
-		if (!attributes || !innerHtml) {
-			continue;
-		}
-
-		const imgTags = innerHtml.matchAll(REGEX.IMG_TAG);
-		for (const [imgTag] of imgTags) {
-			const altText = extractAttribute(imgTag, "alt");
-			if (altText && textRegex.test(altText.trim())) {
-				const absoluteUrl = extractAbsoluteHref(attributes, baseUrl, options);
-				if (absoluteUrl) {
-					return absoluteUrl;
-				}
-			}
-		}
-	}
-
-	return null;
-}
-
-function findLink(
+/**
+ * Finds next or previous page link from HTML.
+ * @param html HTML string to parse.
+ * @param baseUrl Base URL for resolving paths.
+ * @param direction Direction to search ("next" or "prev").
+ * @param options FindNext options.
+ * @returns Found URL, or null.
+ */
+export function findLink(
 	html: string,
 	baseUrl: string,
 	direction: Direction,
@@ -373,9 +440,9 @@ function findLink(
 		"aria-label",
 		"alt",
 	];
+	const excludedHtml = html.replace(REGEX.ARTICLE_EXCLUDE, "");
 
-	// Dispatch table (map of strategies)
-	const strategies: { [key in Method]: (h: string) => string | null } = {
+	const strategies: Record<Method, (h: string) => string | null> = {
 		rel: (h) => findLinkByRel(h, baseUrl, REGEX.REL[direction], options),
 		pagination: (h) =>
 			findLinkByPaginationStructure(
@@ -400,33 +467,25 @@ function findLink(
 		alt: (h) => findLinkByAltText(h, baseUrl, REGEX.TEXT[direction], options),
 	};
 
-	// Try with content excluded first to avoid false positives in article body
-	const excludedHtml = html.replace(REGEX.ARTICLE_EXCLUDE, "");
-
 	for (const method of methods) {
-		// Only apply exclusion to methods that are prone to finding links in text content
-		if (["text", "className", "aria-label", "alt"].includes(method)) {
-			const url = strategies[method](excludedHtml);
-			if (url) {
-				return url;
-			}
-		} else {
-			const url = strategies[method](html);
-			if (url) {
-				return url;
-			}
-		}
+		const targetHtml = ["text", "className", "aria-label", "alt"].includes(
+			method,
+		)
+			? excludedHtml
+			: html;
+		const url = strategies[method](targetHtml);
+		if (url) return url;
 	}
 
 	return null;
 }
 
 /**
- * Attempts multiple strategies in order to find the next page link URL from an HTML string.
- * @param html The HTML string to parse.
- * @param baseUrl The base URL from which the HTML was fetched (for resolving relative paths).
- * @param options Options for specifying search strategies.
- * @returns The URL of the next page, or null if not found.
+ * Finds the next page link from HTML.
+ * @param html HTML string to parse.
+ * @param baseUrl Base URL for resolving paths.
+ * @param options FindNext options.
+ * @returns Next page URL, or null.
  */
 export function findNext(
 	html: string,
@@ -437,11 +496,11 @@ export function findNext(
 }
 
 /**
- * Attempts multiple strategies in order to find the previous page link URL from an HTML string.
- * @param html The HTML string to parse.
- * @param baseUrl The base URL from which the HTML was fetched.
- * @param options Options for specifying search strategies.
- * @returns The URL of the previous page, or null if not found.
+ * Finds the previous page link from HTML.
+ * @param html HTML string to parse.
+ * @param baseUrl Base URL for resolving paths.
+ * @param options FindNext options.
+ * @returns Previous page URL, or null.
  */
 export function findPrev(
 	html: string,
@@ -452,150 +511,67 @@ export function findPrev(
 }
 
 /**
- * Checks if a URL actually exists using a HEAD request.
- * @param url The URL to check.
- * @returns True if the URL exists, false otherwise.
+ * Infers next or previous page URL based on URL patterns.
+ * @param url Current page URL.
+ * @param direction Direction to infer.
+ * @param options Base options.
+ * @returns Inferred URL, or null.
  */
-async function urlExists(url: string, options?: BaseOptions): Promise<boolean> {
-	const controller = new AbortController();
-	const timeoutId = setTimeout(
-		() => controller.abort(),
-		options?.timeout ?? DEFAULT_TIMEOUT_MS,
+export async function findUrlByPattern(
+	url: string,
+	direction: Direction,
+	options?: BaseOptions,
+): Promise<string | null> {
+	const update = (n: number) => (direction === "next" ? n + 1 : n - 1);
+
+	// 1. Query Params
+	const byQuery = await tryUpdatePageNumber(
+		url,
+		update,
+		(u) => {
+			for (const key of ["page", "p", "index"]) {
+				const val = u.searchParams.get(key);
+				if (val) {
+					const num = parseInt(val, 10);
+					if (!Number.isNaN(num)) return { key, value: num };
+				}
+			}
+			return null;
+		},
+		(u, key, newVal) => {
+			const newUrl = new URL(u.href);
+			newUrl.searchParams.set(key, String(newVal));
+			return newUrl.toString();
+		},
+		options,
 	);
+	if (byQuery) return byQuery;
 
-	try {
-		const response = await fetch(url, {
-			method: "HEAD",
-			signal: controller.signal,
-		});
-		return response.ok;
-	} catch {
-		return false;
-	} finally {
-		clearTimeout(timeoutId);
-	}
-}
-
-async function findUrlByQueryParam(
-	url: string,
-	direction: Direction,
-	options?: BaseOptions,
-): Promise<string | null> {
-	try {
-		const urlObject = new URL(url);
-		const params = urlObject.searchParams;
-		let targetKey: string | null = null;
-		let currentValue: number | null = null;
-
-		for (const key of ["page", "p", "index"]) {
-			const value = params.get(key);
-			if (value) {
-				const num = parseInt(value, 10);
-				if (!Number.isNaN(num)) {
-					targetKey = key;
-					currentValue = num;
-					break;
+	// 2. Path Segment
+	return await tryUpdatePageNumber(
+		url,
+		update,
+		(u) => {
+			const match = u.pathname.replace(/\/$/, "").match(REGEX.PATH_PAGE_NUMBER);
+			if (match) {
+				const [_, prefix, numStr] = match;
+				if (prefix !== undefined && numStr !== undefined) {
+					return { key: "", value: parseInt(numStr, 10), prefix };
 				}
 			}
-		}
-
-		if (targetKey && currentValue !== null) {
-			const newNumber =
-				direction === "next" ? currentValue + 1 : currentValue - 1;
-
-			if (newNumber > 0) {
-				params.set(targetKey, String(newNumber));
-				const newUrl = urlObject.toString();
-				if (
-					options?.verifyExists === false ||
-					(await urlExists(newUrl, options))
-				) {
-					return newUrl;
-				}
-			}
-		}
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		options?.logger?.(
-			"warn",
-			`Invalid URL provided to findUrlByQueryParam: ${message}`,
-		);
-	}
-
-	return null;
-}
-
-async function findUrlByPathSegment(
-	url: string,
-	direction: Direction,
-	options?: BaseOptions,
-): Promise<string | null> {
-	try {
-		const urlObject = new URL(url);
-		const pathname = urlObject.pathname.replace(/\/$/, "");
-		const pathMatch = pathname.match(REGEX.PATH_PAGE_NUMBER);
-
-		if (pathMatch) {
-			const [_, prefix, currentNumberStr] = pathMatch;
-			if (prefix && currentNumberStr) {
-				const currentNumber = parseInt(currentNumberStr, 10);
-				const newNumber =
-					direction === "next" ? currentNumber + 1 : currentNumber - 1;
-
-				if (newNumber > 0) {
-					const newPath = `${prefix}${newNumber}`;
-					const newUrl = `${urlObject.origin}${newPath}${urlObject.search}${urlObject.hash}`;
-					if (
-						options?.verifyExists === false ||
-						(await urlExists(newUrl, options))
-					) {
-						return newUrl;
-					}
-				}
-			}
-		}
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		options?.logger?.(
-			"warn",
-			`Invalid URL provided to findUrlByPathSegment: ${message}`,
-		);
-	}
-
-	return null;
+			return null;
+		},
+		(u, _, newVal, prefix) =>
+			`${u.origin}${prefix}${newVal}${u.search}${u.hash}`,
+		options,
+	);
 }
 
 /**
- * Asynchronously infers and finds the next/previous page URL based on URL patterns.
- * @param url The URL of the current page.
- * @param direction "next" or "prev".
- * @param options Options for URL pattern inference.
- * @returns The next/previous page URL, or null if not found.
- */
-async function findUrlByPattern(
-	url: string,
-	direction: Direction,
-	options?: BaseOptions,
-): Promise<string | null> {
-	const urlByQuery = await findUrlByQueryParam(url, direction, options);
-	if (urlByQuery) {
-		return urlByQuery;
-	}
-
-	const urlByPath = await findUrlByPathSegment(url, direction, options);
-	if (urlByPath) {
-		return urlByPath;
-	}
-
-	return null;
-}
-
-/**
- * Asynchronously infers and finds the next page URL based on URL patterns.
- * Increments the page number in the URL and checks if the URL exists.
- * @param url The URL of the current page.
- * @param options Options for URL pattern inference.
- * @returns The next page URL, or null if not found.
+ * Infers the next page URL based on URL patterns.
+ * @param url Current page URL.
+ * @param options Base options.
+ * @returns Next page URL, or null.
  */
 export function findNextByUrl(
 	url: string,
@@ -605,10 +581,10 @@ export function findNextByUrl(
 }
 
 /**
- * Asynchronously infers and finds the previous page URL based on URL patterns.
- * @param url The URL of the current page.
- * @param options Options for URL pattern inference.
- * @returns The previous page URL, or null if not found.
+ * Infers the previous page URL based on URL patterns.
+ * @param url Current page URL.
+ * @param options Base options.
+ * @returns Previous page URL, or null.
  */
 export function findPrevByUrl(
 	url: string,
